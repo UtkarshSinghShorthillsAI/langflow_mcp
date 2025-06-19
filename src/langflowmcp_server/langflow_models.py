@@ -115,6 +115,14 @@ class AllFlowsResponse(BaseModel):
     count: int
     flows: List[FlowModel]
 
+class FlowsListResponse(BaseModel):
+    """A structured response for listing flows, including pagination details."""
+    total_count: int = Field(description="The total number of flows matching the criteria.")
+    flows: List[FlowModel] = Field(description="The list of flows retrieved.")
+    page: Optional[int] = Field(None, description="The current page number, if paginated.")
+    size: Optional[int] = Field(None, description="The number of items per page, if paginated.")
+    pages: Optional[int] = Field(None, description="The total number of pages, if paginated.")
+
 # --- Utility Models ---
 class VersionResponse(BaseModel):
     version: str
