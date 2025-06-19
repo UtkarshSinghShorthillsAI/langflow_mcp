@@ -79,7 +79,7 @@ class LangflowApiClient:
         await self._request("DELETE", f"/api/v1/projects/{project_id}")
 
     # --- Flow CRUD Methods ---
-    async def list_flows(self) -> Dict[str, Any]:
+    async def list_flows(self) -> List[Dict[str, Any]]:
         return await self._request("GET", "/api/v1/flows/")
 
     async def create_flow(self, data: BaseModel) -> Dict[str, Any]:

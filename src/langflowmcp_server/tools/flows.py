@@ -1,9 +1,8 @@
 import logging
 from typing import Optional, List, Dict, Any
-
 from fastmcp import FastMCP, Context
 from fastmcp.exceptions import ToolError
-from pydantic import Field
+from pydantic import Field, ValidationError
 
 from ..langflow_models import LangflowApiException, FlowModel, CreateFlowRequest, UpdateFlowRequest, AllFlowsResponse, GenericSuccessMessage
 from ..app import get_session_langflow_client
@@ -16,9 +15,17 @@ async def list_langflow_flows_impl(ctx: Context) -> AllFlowsResponse:
     try:
         client = await get_session_langflow_client(ctx)
         response = await client.list_flows()
-        return AllFlowsResponse.model_validate(response)
+        structured_response = {
+            "count": len(response),
+            "flows": response
+        }
+        return AllFlowsResponse.model_validate(structured_response)
+        return response
     except LangflowApiException as e:
         raise ToolError(f"Failed to list flows: {e.message}")
+    except ValidationError as e:
+        logger.error(f"Pydantic validation failed for flows list: {e}")
+        raise ToolError(f"Data from Langflow API for flows is malformed: {e}")
 
 async def create_langflow_flow_impl(ctx: Context, name: str, description: Optional[str] = None, project_id: Optional[str] = None) -> FlowModel:
     """Creates a new, empty flow in Langflow, optionally assigning it to a project."""
