@@ -1,5 +1,12 @@
 from pydantic import BaseModel, Field, HttpUrl
 from typing import Any, Dict, List, Optional, Union
+from enum import Enum
+
+# --- Enums from API Spec ---
+class AccessTypeEnum(str, Enum):
+    PRIVATE = "PRIVATE"
+    PUBLIC = "PUBLIC"
+
 
 # --- Custom Exceptions ---
 class LangflowAuthException(Exception): pass
@@ -52,7 +59,7 @@ class UpdateProjectRequest(BaseModel):
 
 # --- Flow Data Structure Models ---
 class FlowNodeData(BaseModel):
-    node: Dict[str, Any]
+    data: Dict[str, Any]
     id: str
     type: str
 
@@ -76,27 +83,45 @@ class FlowModel(BaseModel):
     data: Optional[FlowData] = None
     is_component: bool = False
     updated_at: str
-    webhook: bool
+    webhook: bool = False
     endpoint_name: Optional[str] = None
     locked: bool = False
-    user_id: str
-    project_id: Optional[str] = None
+    user_id: Optional[str] = None
+    folder_id: Optional[str] = None  # Renamed from project_id to match API response
+
+    # New fields to match the API response from the image
+    icon: Optional[str] = None
+    icon_bg_color: Optional[str] = None
+    gradient: Optional[str] = None
+    tags: Optional[List[Any]] = None  # Using List[Any] as the tag structure is not fully visible
+    mcp_enabled: bool = False
+    action_name: Optional[str] = None
+    action_description: Optional[str] = None
+    access_type: AccessTypeEnum = AccessTypeEnum.PRIVATE
 
 class CreateFlowRequest(BaseModel):
     name: str
     description: Optional[str] = None
     data: Optional[FlowData] = None
-    project_id: Optional[str] = None
+    folder_id: Optional[str] = None # Renamed for consistency
 
 class UpdateFlowRequest(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     data: Optional[FlowData] = None
-    project_id: Optional[str] = None
+    folder_id: Optional[str] = None # Renamed for consistency
 
 class AllFlowsResponse(BaseModel):
     count: int
     flows: List[FlowModel]
+
+class FlowsListResponse(BaseModel):
+    """A structured response for listing flows, including pagination details."""
+    total_count: int = Field(description="The total number of flows matching the criteria.")
+    flows: List[FlowModel] = Field(description="The list of flows retrieved.")
+    page: Optional[int] = Field(None, description="The current page number, if paginated.")
+    size: Optional[int] = Field(None, description="The number of items per page, if paginated.")
+    pages: Optional[int] = Field(None, description="The total number of pages, if paginated.")
 
 # --- Utility Models ---
 class VersionResponse(BaseModel):

@@ -1,24 +1,62 @@
 import logging
 from typing import Optional, List, Dict, Any
-
 from fastmcp import FastMCP, Context
 from fastmcp.exceptions import ToolError
-from pydantic import Field
+from pydantic import Field, ValidationError
 
-from ..langflow_models import LangflowApiException, FlowModel, CreateFlowRequest, UpdateFlowRequest, AllFlowsResponse, GenericSuccessMessage
+from ..langflow_models import LangflowApiException, FlowModel, CreateFlowRequest, UpdateFlowRequest, AllFlowsResponse, GenericSuccessMessage, FlowsListResponse
 from ..app import get_session_langflow_client
 
 logger = logging.getLogger(__name__)
 
-async def list_langflow_flows_impl(ctx: Context) -> AllFlowsResponse:
-    """Lists all available flows in Langflow."""
-    logger.info("Tool 'list_langflow_flows' called.")
+async def list_langflow_flows_impl(
+    ctx: Context,
+    remove_example_flows: bool = Field(True, description="If True, example flows are excluded from the results."),
+    components_only: bool = Field(False, description="If True, only flows that are components are returned."),
+    get_all: bool = Field(True, description="If True, fetches all flows, ignoring pagination."),
+    folder_id: Optional[str] = Field(None, description="The unique ID of a folder (project) to filter flows by."),
+    header_flows: bool = Field(False, description="If True, returns only the headers of the flows, not the full data."),
+    page: int = Field(1, description="The page number to retrieve when pagination is active (get_all=False)."),
+    size: int = Field(50, description="The number of items per page when pagination is active (get_all=False).")
+) -> FlowsListResponse:
+    """Lists available flows in LangFlow, with optional filtering and pagination."""
+    logger.info(f"Tool 'list_langflow_flows' called with params: folder_id={folder_id}, get_all={get_all}")
     try:
         client = await get_session_langflow_client(ctx)
-        response = await client.list_flows()
-        return AllFlowsResponse.model_validate(response)
+        response_data = await client.list_flows(
+            remove_example_flows=remove_example_flows,
+            components_only=components_only,
+            get_all=get_all,
+            folder_id=folder_id,
+            header_flows=header_flows,
+            page=page,
+            size=size
+        )
+
+        if isinstance(response_data, list):
+            # API returned a direct list (get_all=True or header_flows=True)
+            return FlowsListResponse(
+                total_count=len(response_data),
+                flows=response_data
+            )
+        elif isinstance(response_data, dict) and "items" in response_data:
+            # API returned a paginated response object
+            return FlowsListResponse(
+                total_count=response_data.get("total", 0),
+                flows=response_data.get("items", []),
+                page=response_data.get("page"),
+                size=response_data.get("size"),
+                pages=response_data.get("pages"),
+            )
+        else:
+            logger.warning(f"Unexpected response format from list_flows: {type(response_data)}")
+            return FlowsListResponse(total_count=0, flows=[])
+
     except LangflowApiException as e:
         raise ToolError(f"Failed to list flows: {e.message}")
+    except ValidationError as e:
+        logger.error(f"Pydantic validation failed for flows list: {e}")
+        raise ToolError(f"Data from Langflow API for flows is malformed: {e}")
 
 async def create_langflow_flow_impl(ctx: Context, name: str, description: Optional[str] = None, project_id: Optional[str] = None) -> FlowModel:
     """Creates a new, empty flow in Langflow, optionally assigning it to a project."""

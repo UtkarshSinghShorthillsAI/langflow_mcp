@@ -79,8 +79,32 @@ class LangflowApiClient:
         await self._request("DELETE", f"/api/v1/projects/{project_id}")
 
     # --- Flow CRUD Methods ---
-    async def list_flows(self) -> Dict[str, Any]:
-        return await self._request("GET", "/api/v1/flows/")
+    async def list_flows(
+        self,
+        remove_example_flows: bool = True,
+        components_only: bool = False,
+        get_all: bool = True,
+        folder_id: Optional[str] = None,
+        header_flows: bool = False,
+        page: int = 1,
+        size: int = 50,
+    ) -> Any:  # Returns Any because the response can be a list or a paginated dict
+        """Lists flows with optional filtering and pagination."""
+        params = {
+            "remove_example_flows": remove_example_flows,
+            "components_only": components_only,
+            "get_all": get_all,
+            "header_flows": header_flows,
+            "page": page,
+            "size": size,
+        }
+        if folder_id:
+            params["folder_id"] = folder_id
+        
+        # Filter out None values to keep the URL clean
+        cleaned_params = {k: v for k, v in params.items() if v is not None}
+        
+        return await self._request("GET", "/api/v1/flows/", params=cleaned_params)
 
     async def create_flow(self, data: BaseModel) -> Dict[str, Any]:
         return await self._request("POST", "/api/v1/flows/", json=data.model_dump(exclude_none=True))
