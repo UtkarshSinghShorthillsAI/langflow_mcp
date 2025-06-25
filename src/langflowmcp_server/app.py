@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import sys
+import json
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator, Dict, Optional
 
@@ -12,6 +13,7 @@ from pydantic import ValidationError
 
 from .langflow_api_client import LangflowApiClient, LangflowApiException, LangflowAuthException
 from .langflow_models import LangflowClientCreds
+from . import globals
 
 # --- Environment & Logging Setup ---
 env_path = os.path.join(os.path.dirname(__file__), "..", "..", ".env")
@@ -90,9 +92,77 @@ async def get_session_langflow_client(ctx: Any) -> LangflowApiClient:
                 _client_creation_locks.pop(session_id, None)
             raise
 
+
+async def fetch_and_cache_components():
+    """
+    Fetches all components from the Langflow API, saves debug files, 
+    and builds a flat cache for fast lookups.
+    """
+    logger.info("Attempting to fetch all components from Langflow API...")
+    
+    base_url = os.getenv("LANGFLOW_BASE_URL")
+    api_key = os.getenv("LANGFLOW_API_KEY")
+
+    if not base_url or not api_key:
+        logger.error("LANGFLOW_BASE_URL and LANGFLOW_API_KEY must be set to fetch components. Builder tools will be unavailable.")
+        return
+
+    client = None
+    try:
+        # Create a temporary, short-lived client for this startup task.
+        client = await LangflowApiClient.create(base_url=base_url, api_key=api_key)
+        
+        # 1. Fetch the component data from the API
+        components_response = await client.get_all_components()
+
+        # 2. Save the RAW NESTED response for debugging
+        # The raw response is a dictionary of categories, e.g., {"agents": {...}, "inputs": {...}}
+        nested_components_dict = components_response
+        raw_debug_path = os.path.join(os.path.dirname(__file__), "debug_components_from_api.json")
+        try:
+            with open(raw_debug_path, 'w') as f:
+                json.dump(nested_components_dict, f, indent=2)
+            logger.info(f"--- Wrote RAW nested component data to {raw_debug_path} ---")
+        except Exception as e:
+            logger.error(f"Failed to write raw debug components file: {e}")
+
+        # 3. Build the flat hash map for efficient searching
+        flat_cache = {}
+        for category_name, components_in_category in nested_components_dict.items():
+            for component_name, component_template in components_in_category.items():
+                if component_name in flat_cache:
+                    logger.warning(f"Duplicate component name '{component_name}' found in category '{category_name}'. It will be overwritten.")
+                flat_cache[component_name] = component_template
+        
+        # 4. Populate the global variable with the flattened map
+        globals.COMPONENT_CACHE = flat_cache
+        
+        # 5. Save the FLATTENED cache for debugging
+        flat_debug_path = os.path.join(os.path.dirname(__file__), "debug_flattened_cache.json")
+        try:
+            with open(flat_debug_path, 'w') as f:
+                json.dump(globals.COMPONENT_CACHE, f, indent=2)
+            logger.info(f"--- Wrote FLATTENED component cache to {flat_debug_path} ---")
+        except Exception as e:
+            logger.error(f"Failed to write flattened debug file: {e}")
+
+        total_components = len(globals.COMPONENT_CACHE)
+        logger.info(f"--- Successfully built and cached a flat map of {total_components} components. ---")
+        if not total_components > 0:
+            logger.warning("Warning: Component cache is empty. The Langflow API might have returned no components.")
+
+    except (LangflowAuthException, LangflowApiException) as e:
+        logger.error(f"Failed to fetch components from Langflow API: {e}. Builder tools will be unavailable.")
+    except Exception as e:
+        logger.exception(f"An unexpected error occurred while fetching components: {e}")
+    finally:
+        if client:
+            await client.close()
+
 @asynccontextmanager
 async def app_lifespan(app: FastMCP) -> AsyncIterator[None]:
     logger.info("LangflowMCP Server application starting...")
+    await fetch_and_cache_components()  # Fetch and cache on startup
     yield
     logger.info("LangflowMCP Server application shutting down...")
     clients_to_close = list(active_langflow_api_clients.values())
@@ -116,7 +186,7 @@ def register_tools() -> None:
     logger.info("Attempting to register Langflow tools...")
     try:
         # Correctly import the existing tool modules
-        from .tools import execution, flows, projects, utility, files, monitoring
+        from .tools import execution, flows, projects, utility, files, monitoring, builder
         
         # Call the registration function from each imported module
         execution.register_execution_tools(mcp_app)
@@ -125,6 +195,7 @@ def register_tools() -> None:
         utility.register_utility_tools(mcp_app)
         files.register_file_tools(mcp_app)
         monitoring.register_monitoring_tools(mcp_app)
+        builder.register_builder_tools(mcp_app)
         
         logger.info("All Langflow tool modules registered successfully.")
     except ImportError as exc:
